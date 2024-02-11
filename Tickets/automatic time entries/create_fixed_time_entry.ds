@@ -1,0 +1,335 @@
+// ╔═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ║
+// ║ This function creates a time entry record for a specific ticket
+// ║
+// ╚═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+settings = Map();
+
+
+// ═════ General settings ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+// Change the TLD according to the Zoho Data Center used [.com, .eu, .in, .com.cn, .com.au, .jp]
+settings.put("zohoDeskApiBaseUrl","https://desk.zoho.eu/api/v1/");
+// A connection is required that has at least this scopes: Desk.tickets.UPDATE, Desk.tickets.READ, Desk.settings.READ (can be created under Settings > Developer Space > Connections)
+settings.put("zohoDeskConnectionName","CHANGE_ME");
+settings.put("zohoAnalyticsOrgId",CHANGE_ME);
+
+
+// ═════ Time entry settings ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+// Either a blanket time entry is only created once (if only an initial effort per ticket is to exist) or a time entry is created once for each assigned agent
+settings.put("createOnlyOneTimeEntry",true);
+// Name of the custom field for marking a time entry as automatically created (create checkbox under Setup > Layout and Fields > Layouts > Time Entry > Layout)
+settings.put("timeEntryCustomFieldName","CHANGE_ME");
+settings.put("timeEntryMinutes",60);
+// If the ticketowner should be used as the owner of the time entry, comment out the following line! Otherwise enter the ID of the desired agent
+settings.put("timeEntryOwnerId",CHANGE_ME);
+// Please only enter values that exist in the pick list of the field or leave it empty (check it under Setup > Layout and Fields > Layouts > Time Entry > Layout)
+settings.put("timeEntryChargeType","CHANGE_ME");
+// The description text is NOT saved as HTML! Line breaks can be inserted with \n
+settings.put("timeEntryDescription","CHANGE_ME");
+settings.put("timeEntryIsBillable",true);
+// Either the costs are fixed or the agent costs and any additional costs are specified and Zoho automatically calculates the total costs
+// Comment out the unused settings!
+settings.put("timeEntryFixedCost",50.50);
+//settings.put("timeEntryAdditionalCost", 100.10);
+//settings.put("timeEntryAgentCostPerHour", 200.20);
+
+
+// ═════ Error handling settings ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+settings.put("sendMailOnErrors",true);
+// Comma separated list of emails possible
+settings.put("emailRecipients","CHANGE_ME");
+// If you want to log in Zoho Analytics, all of the following information must be entered in their entirety
+settings.put("writeDataToAnalyticsOnError",true);
+// Change the TLD according to the Zoho Data Center used [.com, .eu, .in, .com.cn, .com.au, .jp]
+settings.put("zohoAnalyticsApiBaseUrl","https://analyticsapi.zoho.eu/restapi/v2/");
+settings.put("zohoAnalyticsWorkspaceId",CHANGE_ME);
+settings.put("zohoAnalyticsViewId",CHANGE_ME);
+// A connection is required that has at least this scopes: ZohoAnalytics.data.create (can be created under Settings > Developer Space > Connections)
+settings.put("zohoAnalyticsConnectionName","CHANGE_ME");
+
+
+// ═════ Vars ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+errors = List();
+try 
+{
+	time = zoho.currenttime;
+	justDate = time.toString("yyyy-MM-dd");
+	justTime = time.getSuffix(" ");
+	settings.put("timeEntryExecutedTime",justDate + "T" + justTime + ".000Z");
+}
+catch (e)
+{
+	errors.add("Error occured on: Build the current timestamp. | " + e);
+}
+
+
+// ═════ Ugly workaround ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+// In the invokeurl task, no connection can be specified by reading the value from a map, so these values must be stored separately into a variable, then it works...
+zohoDeskConnectionNameHelper = settings.get("zohoDeskConnectionName").toString();
+zohoAnalyticsConnectionNameHelper = settings.get("zohoAnalyticsConnectionName").toString();
+
+
+// ═════ Process ticket owner / agent ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+try 
+{
+	// Initial error check
+	if(errors.size() > 0)
+	{
+		throws "Skipped due to a previous error!";
+	}
+	// Validate ID if specified
+	if(!settings.get("timeEntryOwnerId").isNull() && settings.get("timeEntryOwnerId").toString().length() != 18)
+	{
+		throws "Error occured on: Validate timeEntryOwnerId | The agent-ID ist not valid! An ID must have 18 digits.";
+	}
+	// If no agent ID specified, the ticket owner should be used
+	if(settings.get("timeEntryOwnerId").isNull())
+	{
+		// Get ticket data to get to the ticket owner
+		getTicketResponse = invokeurl
+		[
+			url :settings.get("zohoDeskApiBaseUrl") + "tickets/" + ticketId
+			type :GET
+			connection:zohoDeskConnectionNameHelper
+		];
+		// The response of the API must be checked, because a problem here does not throw an error
+		if(!getTicketResponse.get("errorCode").isNull())
+		{
+			errors.add("Error occured on: Get Ticket via API call (Details) | " + getTicketResponse);
+			throws "Error occured on: Get Ticket via API call (Throw error)";
+		}
+		settings.put("timeEntryOwnerId",getTicketResponse.get("assigneeId"));
+	}
+	if(settings.get("timeEntryOwnerId").isNull())
+	{
+		throws "Error occured on: Process timeEntryOwnerId | ID is null!";
+	}
+}
+catch (e)
+{
+	errors.add("Error occured on: Get ticket data and check time enries | " + e);
+}
+
+
+// ═════ Evaluate time entries of the ticket ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+try 
+{
+	// Initial error check
+	if(errors.size() > 0)
+	{
+		throws "Skipped due to a previous error!";
+	}
+	getTimeEnriesResponse = invokeurl
+	[
+		url :"https://desk.zoho.eu/api/v1/tickets/" + ticketId + "/timeEntry"
+		type :GET
+		connection:"zohodesk_tickets"
+	];
+	// The response of the API must be checked, because a problem here does not throw an error
+	if(!getTimeEnriesResponse.get("errorCode").isNull())
+	{
+		errors.add("Error occured on: Get Time Entries via API call (Details) | " + getTimeEnriesResponse);
+		throws "Error occured on: Get Time Entries via API call (Throw error)";
+	}
+	// Search automatically added time entries for the specified agent
+	currentTimeEnries = getTimeEnriesResponse.get("data");
+	autoTimeEntryFound = false;
+	if(currentTimeEnries.size() > 0)
+	{
+		for each  entry in currentTimeEnries
+		{
+			if(autoTimeEntryFound)
+			{
+				break;
+			}
+			if(entry.get("cf").get(settings.get("timeEntryCustomFieldName")) != "true")
+			{
+				break;
+			}
+			if(!settings.get("createOnlyOneTimeEntry") && entry.get("ownerId") != settings.get("timeEntryOwnerId"))
+			{
+				break;
+			}
+			autoTimeEntryFound = true;
+		}
+	}
+	// todo
+	if(autoTimeEntryFound)
+	{
+		return;
+	}
+}
+catch (e)
+{
+	errors.add("Error occured on: Evaluate time entries of the ticket | " + e);
+}
+
+
+// ═════ Create time entry ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+try 
+{
+	// Initial error check
+	if(errors.size() > 0)
+	{
+		throws "Skipped due to a previous error!";
+	}
+
+
+	// ═════ Validate and build the time entry ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+	timeEntry = Map();
+	timeEntryCf = Map();
+	timeEntryCf.put(settings.get("timeEntryCustomFieldName"),true);
+	timeEntry.put("cf",timeEntryCf);
+	timeEntry.put("ownerId",settings.get("timeEntryOwnerId"));
+	timeEntry.put("secondsSpent",settings.get("timeEntryMinutes") * 60);
+	timeEntry.put("executedTime",settings.get("timeEntryExecutedTime"));
+	timeEntry.put("isBillable",settings.get("timeEntryIsBillable"));
+
+
+	// ═════ timeEntryChargeType 
+
+	if(settings.get("timeEntryChargeType").length() > 120)
+	{
+		throws "timeEntryChargeType has too many characters (max chars = 120!)";
+	}
+	timeEntry.put("requestChargeType",settings.get("timeEntryChargeType"));
+
+
+	// ═════ Proccess timeEntryDescription 
+
+	if(settings.get("timeEntryDescription").length() > 65535)
+	{
+		throws "timeEntryDescription has too many characters (max chars = 65535!)";
+	}
+	timeEntry.put("description",settings.get("timeEntryDescription"));
+
+	// ═════ Proccess costs 
+
+
+	if(!settings.get("timeEntryFixedCost").isNull() && (!settings.get("timeEntryAdditionalCost").isNull() || !settings.get("timeEntryAgentCostPerHour").isNull()))
+	{
+		throws "There is a value for timeEntryFixedCost and also a value for timeEntryAdditionalCost or timeEntryAgentCostPerHour, which makes no sense!";
+	}
+	if(!settings.get("timeEntryFixedCost").isNull())
+	{
+		timeEntry.put("fixedCost",settings.get("timeEntryFixedCost"));
+	}
+	else
+	{
+		timeEntry.put("additionalCost",settings.get("timeEntryAdditionalCost"));
+		timeEntry.put("agentCostPerHour",settings.get("timeEntryAgentCostPerHour"));
+	}
+
+
+	// ═════ Create the time entry ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+	createTimeEntryResponse = invokeurl
+	[
+		url :settings.get("zohoDeskApiBaseUrl") + "tickets/" + ticketId + "/timeEntry"
+		type :POST
+		parameters:timeEntry.toString().replaceAll("\\n","\n")
+		connection:zohoDeskConnectionNameHelper
+	];
+	// The response of the API must be checked, because a problem here does not throw an error
+	if(!createTimeEntryResponse.get("errorCode").isNull())
+	{
+		errors.add("Error occured on: Create time entry via API call (Details) | " + createTimeEntryResponse);
+		throws "Error occured on: Create time entry via API call (Throw error)";
+	}
+}
+catch (e)
+{
+	errors.add("Error occured on: Create time entry | " + e);
+}
+
+
+// ═════ Proccess errors ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+if(errors.size() = 0)
+{
+	return;
+}
+
+// ═════ Insert error in Zoho Analytics table ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+if(settings.get("writeDataToAnalyticsOnError"))
+{
+	try 
+	{
+		zohoAnalyticsApiDataColumns = Map();
+		zohoAnalyticsApiDataColumns.put("debug_level","Error");
+		zohoAnalyticsApiDataColumns.put("app","Zoho Desk");
+		zohoAnalyticsApiDataColumns.put("created_on",zoho.currenttime.toString("yyyy-MM-dd HH:mm:ss"));
+		zohoAnalyticsApiDataColumns.put("details",errors);
+		zohoAnalyticsApiDataColumns.put("inputs_and_settings",settings);
+		zohoAnalyticsApiDataColumns.put("user_mail",zoho.loginuserid);
+		zohoAnalyticsApiData = Map();
+		zohoAnalyticsApiData.put("columns",zohoAnalyticsApiDataColumns);
+		zohoAnalyticsInsertionUrl = settings.get("zohoAnalyticsApiBaseUrl") + "workspaces/" + settings.get("zohoAnalyticsWorkspaceId") + "/views/" + settings.get("zohoAnalyticsViewId") + "/rows?CONFIG=" + zoho.encryption.urlEncode(zohoAnalyticsApiData);
+		zohoAnalyticsApiHeader = Map();
+		zohoAnalyticsApiHeader.put("ZANALYTICS-ORGID",settings.get("zohoAnalyticsOrgId"));
+		zohoAnalyticsInsertionResponse = invokeurl
+		[
+			url :zohoAnalyticsInsertionUrl
+			type :POST
+			headers:zohoAnalyticsApiHeader
+			connection:zohoAnalyticsConnectionNameHelper
+		];
+		// The response of the API must be checked, because a problem here does not throw an error
+		if(!zohoAnalyticsInsertionResponse.get("errorCode").isNull())
+		{
+			errors.add("Error occured on: Create row via API call (Details) | " + zohoAnalyticsInsertionResponse);
+			throws "Error occured on: Create row via API call (Throw error)";
+		}
+	}
+	catch (e)
+	{
+		errors.add("Error occured on: Insert row into Zoho Analtics table | " + e);
+	}
+}
+
+
+// ═════ mail notification ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+if(settings.get("sendMailOnErrors"))
+{
+	// Templates for the email body
+	htmlErrorTableTemplate = '<style>#errors{font-family:Arial,Helvetica,sans-serif;border-collapse:collapse;width:100%}#errors td,#errors th{border:1px solid #ddd;padding:8px}#errors tr:hover,#errors tr:nth-child(even){background-color:#ddd}#errors th{padding-top:12px;padding-bottom:12px;text-align:left;background-color:#9e3737;color:#fff}</style><table id=errors><tr><th>Error</th></tr>${rows}</table>';
+	htmlErrorTableRowTemplate = '<tr><td>${content}</td></tr>';
+	htmlSettingsTableTemplate = '<style>#settings{font-family:Arial,Helvetica,sans-serif;border-collapse:collapse;width:100%}#settings td,#settings th{border:1px solid #ddd;padding:8px}#settings tr:hover,#settings tr:nth-child(even){background-color:#ddd}#settings th{padding-top:12px;padding-bottom:12px;text-align:left;background-color:#b38f5d;color:#fff}</style><table id=settings><tr><th>Setting</th><th>Value</th></tr>${rows}</table>';
+	htmlSettingsTableRowTemplate = '<tr><td>${key}</td><td>${value}</td></tr>';
+	// Build settings table
+	settingsMapKeys = settings.keys();
+	counterHelper = 0;
+	htmlSettingTableRows = "";
+	for each  setting in settings
+	{
+		htmlSettingTableRows = htmlSettingTableRows + htmlSettingsTableRowTemplate.replaceAll("${key}",settingsMapKeys.get(counterHelper),true).replaceAll("${value}",setting,true);
+		counterHelper = counterHelper + 1;
+	}
+	// Build error table
+	htmlErrorTableRows = "";
+	for each  error in errors
+	{
+		htmlErrorTableRows = htmlErrorTableRows + htmlErrorTableRowTemplate.replaceAll("${content}",error,true);
+	}
+	// Build the final email body
+	emailBody = htmlSettingsTableTemplate.replaceAll("${rows}",htmlSettingTableRows,true);
+	emailBody = emailBody + htmlErrorTableTemplate.replaceAll("${rows}",htmlErrorTableRows,true);
+	sendmail
+	[
+		from :zoho.adminuserid
+		to :settings.get("emailRecipients")
+		subject :"⚠️ An error occurred when executing a custom function inside zoho desk"
+		message :emailBody
+	]
+}
