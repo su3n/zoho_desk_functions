@@ -1,1 +1,2 @@
-"# zoho_desk_functions" 
+# Custom Functions (Deluge Script)
+A collection of code snippets, tips & tricks for ZOHO Desk.
