@@ -2,6 +2,8 @@
 
 This documentation provides an explanation of the custom function written in Deluge Script for Zoho Desk. The function is designed to create a time entry record for a specific ticket.
 
+**Please note**: A custom field must be created so that time entries can be marked as automatic entries! The name must be stored in the `timeEntryCustomFieldName` setting! Further details below.
+
 ## General Settings
 
 The following general settings are defined at the beginning of the script:
@@ -31,6 +33,8 @@ Either the costs are fixed or the costs of the agent and any additional costs ar
 
 ## Error Handling Settings
 
+### E-Mail
+
 Settings related to error handling and notifications:
 
 - `sendMailOnErrors`: Boolean value to determine whether to send an email notification on errors. If this option is active, the following values must be defined. Otherwise they can be commented out or removed:
@@ -43,7 +47,11 @@ Settings related to error handling and notifications:
     - `ZohoAnalytics.data.create`
   - `zohoAnalyticsOrgId`: Organization ID for Zoho Analytics. To find out the ID, open Analytics and navigate to Settings > General > Organization Details. You can see the ID in the URL. `https://analytics.zoho.{tld}/orgsettings/org-details/{#### this value ####}`
 
-### Zoho Analytics Table
+#### Example error mail
+
+![Example error mail](error_logging_mail.png)
+
+### Zoho Analytics
 
 You need the following columns for logging in a Zoho Ananlytics table. If you want to use other columns, you can adapt the code yourself.
 
@@ -53,6 +61,10 @@ You need the following columns for logging in a Zoho Ananlytics table. If you wa
 - `details` Multi Line Text
 - `inputs_and_settings` Multi Line Text
 - `user_mail` E-mail
+
+#### Example Zoho Analtics Error Log
+
+![Example Zoho Analtics Error Log](error_logging_zoho_analytics.png)
 
 ## Variables and Timestamp
 
