@@ -139,9 +139,18 @@ try
 	{
 		throws "Skipped due to a previous error!";
 	}
+
+	mailBodyContent = getThreadResponse.get("content");
+
+	// If we reply to an email via zoho desk, this element exists before the quoted last email
+	if(mailBodyContent.indexOf('<blockquote class="x_') >= 0)
+	{
+		mailBodyContent = mailBodyContent.subString(0,mailBodyContent.indexOf('<blockquote class="x_'));
+	}
+
 	tempMarking = randomNumber(0,9999999);
 	// remove all HTML tags
-	mailBodyContent = getThreadResponse.get("content").replaceAll("<[^>]*>","");
+	mailBodyContent = mailBodyContent.replaceAll("<[^>]*>","");
 	searchResultStartIndex = mailBodyContent.replaceAll(regEx,tempMarking).indexOf(tempMarking);
 	if(searchResultStartIndex < 0)
 	{
