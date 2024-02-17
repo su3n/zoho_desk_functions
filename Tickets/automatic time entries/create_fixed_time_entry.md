@@ -31,60 +31,47 @@ Either the costs are fixed or the costs of the agent and any additional costs ar
 - `timeEntryAdditionalCost`: Additional cost associated with the time entry. (Float value)
 - `timeEntryAgentCostPerHour`: Agent cost per hour for the time entry. (Float value)
 
-## Error Handling Settings
+## Error Handling
 
 ### E-Mail
 
-Settings related to error handling and notifications:
+Settings for error handling and notifications:
 
-- `sendMailOnErrors`: Boolean value to determine whether to send an email notification on errors. If this option is active, the following values must be defined. Otherwise they can be commented out or removed:
-  - `emailRecipients`: Comma-separated list of email recipients for error notifications.
-- `writeDataToAnalyticsOnError`: Boolean value indicating whether to log errors in Zoho Analytics. If this option is active, the following values must be defined. Otherwise they can be commented out or removed
-  - `zohoAnalyticsApiBaseUrl`: The base URL for Zoho Analytics API. [(click here to open the Zoho Analytics API documentation)](https://www.zoho.com/analytics/api/v2/introduction.html)
-  - `zohoAnalyticsWorkspaceId`: Workspace ID in Zoho Analytics. Open the table, you can see the ID in the URL. `https://analytics.zoho.{tld}/workspace/{#### this value ####}/view/{id}`
-  - `zohoAnalyticsViewId`: View ID in Zoho Analytics. Open the table, you can see the ID in the URL. `https://analytics.zoho.{tld}/workspace/{id}/view/{#### this value ####}`
-  - `zohoAnalyticsConnectionName`: Connection name for Zoho Analytics. You can create a new connection under Settings > DEVELOPER SPACE > Connections. Note that the following scopes are required:
-    - `ZohoAnalytics.data.create`
-  - `zohoAnalyticsOrgId`: Organization ID for Zoho Analytics. To find out the ID, open Analytics and navigate to Settings > General > Organization Details. You can see the ID in the URL. `https://analytics.zoho.{tld}/orgsettings/org-details/{#### this value ####}`
-
-#### Example error mail
-
-![Example error mail](error_logging_mail.png)
+- `sendMailOnErrors`: Boolean value controlling email notifications on errors. Requires defined values for:
+  - `emailRecipients`: Comma-separated list of email recipients.
+- `writeDataToAnalyticsOnError`: Boolean value indicating logging errors in Zoho Analytics. Requires defined values for:
+  - `zohoAnalyticsApiBaseUrl`: Base URL for Zoho Analytics API.
+  - `zohoAnalyticsWorkspaceId`: Workspace ID in Zoho Analytics.
+  - `zohoAnalyticsViewId`: View ID in Zoho Analytics.
+  - `zohoAnalyticsConnectionName`: Connection name for Zoho Analytics. Requires scope: `ZohoAnalytics.data.create`.
+  - `zohoAnalyticsOrgId`: Organization ID in Zoho Analytics.
 
 ### Zoho Analytics
 
-You need the following columns for logging in a Zoho Ananlytics table. If you want to use other columns, you can adapt the code yourself.
+Columns needed for logging in Zoho Analytics:
 
-- `debug_level` Plain Text
-- `app` Plain Text
-- `cerated_on` Date
-- `details` Multi Line Text
-- `inputs_and_settings` Multi Line Text
-- `user_mail` E-mail
+- `debug_level` (Plain Text): Indicates the level of detail for logging (e.g., DEBUG, INFO, ERROR).
+- `app` (Plain Text): Holds the name of the application for logging.
+- `location` (Plain Text): Basic information about the context of the logging.
+- `location_details` (Multi-Line Text): Additional context details for logging.
+- `created_on` (Date): Timestamp of the logging event.
+- `message` (Multi-Line Text): General details or error messages.
+- `user_mail` (E-mail): User's email associated with the logging event.
 
-#### Example Zoho Analtics Error Log
+## Process / Workflow
 
-![Example Zoho Analtics Error Log](error_logging_zoho_analytics.png)
+### Validate Agent ID
 
-## Variables and Timestamp
+- Validate the specified agent ID format (18 digits).
+- If no agent ID is provided, retrieve ticket data to obtain the ticket owner's ID. If the ticket is not assigned, the process is canceled.
 
-The script defines a `settings` map and initializes it. It also extracts the current timestamp and formats it for later use.
+### Evaluate Time Entries of the Ticket
 
-## Ticket Owner / Agent Processing
+- Retrieve time entries for the specified ticket.
+- Search for automatically added time entries associated with the specified agent.
+- Cancel the process if an automatic time entry is found for the agent (as defined in the settings or based on the current ticket owner).
 
-The script retrieves ticket data and validates the agent ID. If no agent ID is specified, it uses the ticket owner's ID.
+### Create Time Entry
 
-## Evaluate Time Entries
-
-The script checks existing time entries for the specified agent to determine if an automatic time entry already exists.
-
-## Create Time Entry
-
-Finally, the script validates, builds, and creates a new time entry based on the defined settings. It handles error checks and logs errors if necessary. If configured, it also logs errors in Zoho Analytics and sends email notifications.
-
-## Note
-
-- The script contains a workaround for reading connection names in the `invokeurl` task.
-- The code includes detailed error handling and logging mechanisms.
-
-Please make sure to replace placeholder values like `CHANGE_ME` with the actual values required for your Zoho Desk and Zoho Analytics configurations.
+- Validate and construct the time entry using specified parameters.
+- A special flag is used to indicate the automated nature of time entries and to avoid duplicates. This requires a custom field (checkbox) in the time entry module, which is preferably visible to users (see permission settings). The entry is marked as an automatic entry via the checked box. Although adding this field to layouts is optional, it is of course useful for users. For functional reasons, its presence in layouts is not mandatory!
