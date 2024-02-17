@@ -3,32 +3,51 @@
 // ║ This function parses the latest e-mail and updates the ticket status if the defined criteria match
 // ║
 // ╚═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
 settings = Map();
 parameters = Map();
 information = Map();
+
+
 // ═════ General Information ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
 // Mainly for logging
 information.put("functionName", "update_ticket_status_on_mail_command");
 information.put("creatorName", "Doe, John");
 information.put("creationDate", "2024-02-16");
+
+
 // ═════ Parameters ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
 // Mainly for logging
 parameters.put("ticketId", ticketId);
+
+
 // ═════ General settings ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
 // Change the TLD according to the Zoho Data Center used [.com, .eu, .in, .com.cn, .com.au, .jp]
 settings.put("zohoDeskApiBaseUrl","https://desk.zoho.eu/api/v1/");
 // A connection is required that has at least this scopes: Desk.tickets.READ, Desk.basic.READ, Desk.tickets.UPDATE (can be created under Settings > Developer Space > Connections)
 settings.put("zohoDeskConnectionName","CHANGE_ME");
 settings.put("zohoAnalyticsOrgId",CHANGE_ME);
+
+
 // ═════ Search settings ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
 // The ~ character represents the name of the desired new ticket status 
 settings.put("searchTemplate",'#new_ticket_status="~"');
+
+
 // ═════ Comment settings ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
 settings.put("createComment",true);
 settings.put("commentIsPublic",false);
 // The ~ character represents the name of the new ticket status 
 settings.put("commentContent","The status of the ticket was automatically set to <b style='color: white; background-color: darkgray; padding: 5px; border: solid 1px gray; border-radius: 20px;'>~</b> due to an email.");
+
+
 // ═════ Error handling settings ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
 settings.put("sendMailOnErrors",true);
 // Comma separated list of emails possible
 settings.put("emailRecipients","CHANGE_ME");
@@ -40,13 +59,22 @@ settings.put("zohoAnalyticsWorkspaceId",CHANGE_ME);
 settings.put("zohoAnalyticsViewId",CHANGE_ME);
 // A connection is required that has at least this scopes: ZohoAnalytics.data.create (can be created under Settings > Developer Space > Connections)
 settings.put("zohoAnalyticsConnectionName","CHANGE_ME");
+
+
 // ═════ Vars ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
 errors = List();
+
+
 // ═════ Ugly workaround ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
 // In the invokeurl task, no connection can be specified by reading the value from a map, so these values must be stored separately into a variable, then it works...
 zohoDeskConnectionNameHelper = settings.get("zohoDeskConnectionName").toString();
 zohoAnalyticsConnectionNameHelper = settings.get("zohoAnalyticsConnectionName").toString();
+
+
 // ═════ Validate and prepare search template ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
 try 
 {
 	// Only certain special characters are allowed in the search template: # _ ~ { } "
@@ -67,7 +95,10 @@ catch (e)
 {
 	errors.add("Error occured on: Validate search template | " + e);
 }
+
+
 // ═════ Get latest thread ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
 try 
 {
 	// Initial error check
@@ -97,7 +128,10 @@ catch (e)
 {
 	errors.add("Error occured on: Get latest Ticket Thread | " + e);
 }
+
+
 // ═════ Search ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
 try 
 {
 	// Initial error check
@@ -133,7 +167,10 @@ catch (e)
 {
 	errors.add("Error occured on: Search | Used RegEx: " + regEx + " | Error: " + e);
 }
+
+
 // ═════ Get ticket data ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
 try 
 {
 	// Initial error check
@@ -158,7 +195,10 @@ catch (e)
 {
 	errors.add("Error occured on: Get Ticket Data | " + e);
 }
+
+
 // ═════ Check if found status is valid ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
 try {
 	// Initial error check
 	if(errors.size() > 0)
@@ -212,7 +252,10 @@ try {
 } catch(e) {
 	errors.add("Error occured on: Check if found status is valid | " + e);
 }
+
+
 // ═════ Blueprint ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
 try {
 	// Initial error check
 	if(errors.size() > 0)
@@ -250,7 +293,10 @@ try {
 } catch (e) {
 	errors.add("Error occured on: Check blueprint | " + e);
 }
+
+
 // ═════ Set the desired status ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
 try {
 	// Initial error check
 	if(errors.size() > 0)
@@ -292,7 +338,10 @@ try {
 } catch (e) {
 	errors.add("Error occured on: Update Ticket Status | " + e);
 }
+
+
 // ═════ Comment ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
 try {
 	if(settings.get("createComment")) {
 		// Initial error check
@@ -321,12 +370,14 @@ try {
 	errors.add("Error occured on: Commenting Ticket | " + e);
 }
 
+
 // ═════ Proccess errors ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
 if(errors.size() = 0)
 {
 	return;
 }
+
 
 // ═════ Insert error in Zoho Analytics table ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
@@ -341,7 +392,7 @@ if(settings.get("writeDataToAnalyticsOnError"))
 		zohoAnalyticsApiDataColumns.put("location","Custom Function");
 		zohoAnalyticsApiDataColumns.put("location_details","update_ticket_status_based_on_email");
 		zohoAnalyticsApiDataColumns.put("created_on",zoho.currenttime.toString("yyyy-MM-dd HH:mm:ss"));
-		zohoAnalyticsApiDataColumns.put("error_details",errors);
+		zohoAnalyticsApiDataColumns.put("message",errors);
 		zohoAnalyticsApiDataColumns.put("input_details",'{"data":"information":' + information.toString() + ',"parameters":' + parameters.toString() + ',"settings":' + settings.toString() + '}');
 		zohoAnalyticsApiDataColumns.put("user_mail",zoho.loginuserid);
 		zohoAnalyticsApiData = Map();
