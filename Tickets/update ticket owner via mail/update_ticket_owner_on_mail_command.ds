@@ -1,0 +1,438 @@
+// ╔═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ║
+// ║ This function parses the latest e-mail and updates the ticket owner
+// ║
+// ╚═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+settings = Map();
+parameters = Map();
+information = Map();
+
+
+// ═════ General Information ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+// Mainly for logging
+information.put("functionName", "update_ticket_owner_on_mail_command");
+information.put("creatorName", "Doe, John");
+information.put("creationDate", "2024-02-23");
+
+
+// ═════ Parameters ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+// Mainly for logging
+parameters.put("ticketId", ticketId);
+
+
+// ═════ General settings ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+// Change the TLD according to the Zoho Data Center used [.com, .eu, .in, .com.cn, .com.au, .jp]
+settings.put("zohoDeskApiBaseUrl","https://desk.zoho.eu/api/v1/");
+// A connection is required that has at least this scopes: Desk.tickets.READ, Desk.basic.READ, Desk.tickets.UPDATE (can be created under Settings > Developer Space > Connections)
+settings.put("zohoDeskConnectionName","CHANGE_ME");
+settings.put("zohoAnalyticsOrgId",CHANGE_ME);
+
+
+// ═════ Search settings ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+// The ~ character represents the mail of the desired new ticket owner 
+settings.put("searchTemplate",'#ticket_owner="~"');
+
+
+// ═════ Comment settings ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+settings.put("createComment",true);
+settings.put("commentIsPublic",false);
+// The ~ character represents the name of the new ticket status 
+settings.put("commentContent","The ticket owner was automatically set to <b style='color: white; background-color: darkgray; padding: 5px; border: solid 1px gray; border-radius: 20px;'>~</b> due to an email command.");
+
+
+// ═════ Error handling settings ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+settings.put("sendMailOnErrors",true);
+// Comma separated list of emails possible
+settings.put("emailRecipients","CHANGE_ME");
+// If you want to log in Zoho Analytics, all of the following information must be entered in their entirety
+settings.put("writeDataToAnalyticsOnError",true);
+// Change the TLD according to the Zoho Data Center used [.com, .eu, .in, .com.cn, .com.au, .jp]
+settings.put("zohoAnalyticsApiBaseUrl","https://analyticsapi.zoho.eu/restapi/v2/");
+settings.put("zohoAnalyticsWorkspaceId",CHANGE_ME);
+settings.put("zohoAnalyticsViewId",CHANGE_ME);
+// A connection is required that has at least this scopes: ZohoAnalytics.data.create (can be created under Settings > Developer Space > Connections)
+settings.put("zohoAnalyticsConnectionName","CHANGE_ME");
+
+
+// ═════ Vars ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+errors = List();
+
+
+// ═════ Ugly workaround ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+// In the invokeurl task, no connection can be specified by reading the value from a map, so these values must be stored separately into a variable, then it works...
+zohoDeskConnectionNameHelper = settings.get("zohoDeskConnectionName").toString();
+zohoAnalyticsConnectionNameHelper = settings.get("zohoAnalyticsConnectionName").toString();
+
+
+// ═════ Validate and prepare search template ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+try 
+{
+	// Only certain special characters are allowed in the search template: # _ ~ { } "
+	searchTemplateValidation = settings.get("searchTemplate").replaceAll('[^#_~="A-Za-z0-9äöüÄÖÜß]',"illegalSpecialCharacter");
+	if(searchTemplateValidation.contains("illegalSpecialCharacter"))
+	{
+		errors.add("Illegal special character was found! " + searchTemplateValidation);
+	}
+	if(searchTemplateValidation.getOccurenceCount("~") != 1)
+	{
+		errors.add("Placeholder character was not found or it exists several times!");
+	}
+	searchTemplateStart = settings.get("searchTemplate").left(settings.get("searchTemplate").indexOf("~"));
+	searchTemplateEnd = settings.get("searchTemplate").replaceFirst(searchTemplateStart + "~","",true);
+	regEx = searchTemplateStart + "[\-a-zA-Z\.@ ]+" + searchTemplateEnd;
+}
+catch (e)
+{
+	errors.add("Error occured on: Validate search template | " + e);
+}
+
+
+// ═════ Get latest thread ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+try 
+{
+	// Initial error check
+	if(errors.size() > 0)
+	{
+		throws "Skipped due to a previous error!";
+	}
+	getThreadResponse = invokeurl
+	[
+		url :settings.get("zohoDeskApiBaseUrl") + "tickets/" + parameters.get("ticketId") + "/latestThread"
+		type :GET
+		connection:zohoDeskConnectionNameHelper
+	];
+	// The response of the API must be checked, because a problem here does not throw an error
+	if(!getThreadResponse.get("errorCode").isNull())
+	{
+		errors.add("getThreadResponse: " + getThreadResponse);
+		throws "Error occured on: Get latest Ticket Thread via API Call";
+	}
+	// If no thread exists, it makes no sense to call the function. This is therefore interpreted as an error
+	if(getThreadResponse.isNull())
+	{
+		throws "No thread was found!";
+	}
+}
+catch (e)
+{
+	errors.add("Error occured on: Get latest Ticket Thread | " + e);
+}
+
+
+// ═════ Search ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+try 
+{
+	// Initial error check
+	if(errors.size() > 0)
+	{
+		throws "Skipped due to a previous error!";
+	}
+
+	mailBodyContent = getThreadResponse.get("content");
+
+	// If we reply to an email via zoho desk, this element exists before the quoted last email
+	if(mailBodyContent.indexOf('<blockquote class="x_') >= 0)
+	{
+		mailBodyContent = mailBodyContent.subString(0,mailBodyContent.indexOf('<blockquote class="x_'));
+	}
+
+	tempMarking = randomNumber(0,9999999);
+	// remove all HTML tags
+	mailBodyContent = mailBodyContent.replaceAll("<[^>]*>","");
+	searchResultStartIndex = mailBodyContent.replaceAll(regEx,tempMarking).indexOf(tempMarking);
+	if(searchResultStartIndex < 0)
+	{
+		// Nothing was found in the e-mail text that matches the search template
+		return;
+	}
+	searchResultStartIndex = searchResultStartIndex + searchTemplateStart.length();
+	searchContentForEndMarking = mailBodyContent.subString(searchResultStartIndex,mailBodyContent.length());
+	searchResultEndIndexInTempSpace = searchContentForEndMarking.indexOf(searchTemplateEnd);
+	if(searchResultEndIndexInTempSpace < 0)
+	{
+		throws "The search template was used in the e-mail text and something was found, if the end of the search template is not found, there must definitely be an error...";
+	}
+	searchResultEndIndex = searchResultStartIndex + searchResultEndIndexInTempSpace;
+	searchResult = mailBodyContent.subString(searchResultStartIndex,searchResultEndIndex);
+	searchResult = trim(searchResult);
+	if(searchResult.isEmpty()) {
+		// The search template was found in the e-mail text, but it has no content, nothing to do...
+		return;
+	}
+}
+catch (e)
+{
+	errors.add("Error occured on: Search | Used RegEx: " + regEx + " | Error: " + e);
+}
+
+// ═════ Get ticket data ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+try 
+{
+	// Initial error check
+	if(errors.size() > 0)
+	{
+		throws "Skipped due to a previous error!";
+	}
+	getTicketResponse = invokeurl
+	[
+		url :settings.get("zohoDeskApiBaseUrl") + "tickets/" + parameters.get("ticketId")
+		type :GET
+		connection:zohoDeskConnectionNameHelper
+	];
+	// The response of the API must be checked, because a problem here does not throw an error
+	if(!getTicketResponse.get("errorCode").isNull())
+	{
+		errors.add("getTicketResponse: " + getTicketResponse);
+		throws "Error occured on: Get Ticket Data via API Call";
+	}
+}
+catch (e)
+{
+	errors.add("Error occured on: Get Ticket Data | " + e);
+}
+
+
+// ═════ Check if found mail is valid ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+try {
+	// Initial error check
+	if(errors.size() > 0)
+	{
+		throws "Skipped due to a previous error!";
+	}
+	if(!searchResult.matches("^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+\.[A-Za-z]{2,}$")) {
+		errors.add("Search result: " + searchResult);
+		throws "Search result is no valid mail address!";
+	}
+	getAgentResponse = invokeurl
+	[
+		url :settings.get("zohoDeskApiBaseUrl") + "agents/email/" + searchResult
+		type :GET
+		connection:zohoDeskConnectionNameHelper
+	];
+	// Check if agent was found
+	if(getAgentResponse.isNull())
+	{
+		errors.add("searchResult: " + searchResult);
+		throws "The mail address in the mail command is not a valid agent mail!";
+	}
+	// The response of the API must be checked, because a problem here does not throw an error
+	if(!getAgentResponse.get("errorCode").isNull())
+	{
+		errors.add("getAgentResponse: " + getAgentResponse);
+		throws "Error occured on: Get Agent via API Call";
+	}
+	agentId = getAgentResponse.get("id");
+	
+} catch(e) {
+	errors.add("Error occured on: Check if found status is valid | " + e);
+}
+
+
+// ═════ Set the desired ticket owner ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+try {
+	// Initial error check
+	if(errors.size() > 0)
+	{
+		throws "Skipped due to a previous error!";
+	}
+	updateTicketData = Map();
+	updateTicketData.put("assigneeId", agentId);
+	updateTicketResponse = invokeurl
+	[
+		url :settings.get("zohoDeskApiBaseUrl") + "tickets/" + parameters.get("ticketId")
+		type :PATCH
+		parameters:updateTicketData.toString()
+		connection:zohoDeskConnectionNameHelper
+	];
+	// The response of the API must be checked, because a problem here does not throw an error
+	if(!updateTicketResponse.get("errorCode").isNull())
+	{
+		errors.add("updateTicketResponse: " + updateTicketResponse);
+	 	throws "Error occured on: Update Ticket Owner via API Call";
+	}
+} catch (e) {
+	errors.add("Error occured on: Update Ticket Owner | " + e);
+}
+
+
+// ═════ Comment ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+try {
+	if(settings.get("createComment")) {
+		// Initial error check
+		if(errors.size() > 0)
+		{
+			throws "Skipped due to a previous error!";
+		}
+		createTicketCommentData = Map();
+		createTicketCommentData.put("content", settings.get("commentContent").replaceAll("~", searchResult, true));
+		createTicketCommentData.put("isPublic", settings.get("commentIsPublic"));
+		createTicketCommentResponse = invokeurl
+		[
+			url :settings.get("zohoDeskApiBaseUrl") + "tickets/" + parameters.get("ticketId") + "/comments"
+			type :POST
+			parameters:createTicketCommentData.toString()
+			connection:zohoDeskConnectionNameHelper
+		];
+		// The response of the API must be checked, because a problem here does not throw an error
+		if(!createTicketCommentResponse.get("errorCode").isNull())
+		{
+			errors.add("createTicketCommentResponse: " + createTicketCommentResponse);
+			throws "Error occured on: Commenting Ticket via API Call";
+		}
+	}
+} catch (e) {
+	errors.add("Error occured on: Commenting Ticket | " + e);
+}
+
+
+// ═════ Proccess errors ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+if(errors.size() = 0)
+{
+	return;
+}
+
+
+// ═════ Insert error in Zoho Analytics table ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+if(settings.get("writeDataToAnalyticsOnError"))
+{
+	try 
+	{
+		zohoAnalyticsApiDataColumns = Map();
+		zohoAnalyticsApiDataColumns.put("debug_level","Error");
+		zohoAnalyticsApiDataColumns.put("app","Zoho Desk");
+		zohoAnalyticsApiDataColumns.put("location","Custom Function");
+		zohoAnalyticsApiDataColumns.put("location_details","update_ticket_status_based_on_email");
+		zohoAnalyticsApiDataColumns.put("created_on",zoho.currenttime.toString("yyyy-MM-dd HH:mm:ss"));
+		zohoAnalyticsApiDataColumns.put("message",errors);
+		zohoAnalyticsApiDataColumns.put("input_details",'{"data":"information":' + information.toString() + ',"parameters":' + parameters.toString() + ',"settings":' + settings.toString() + '}');
+		zohoAnalyticsApiDataColumns.put("user_mail",zoho.loginuserid);
+		zohoAnalyticsApiData = Map();
+		zohoAnalyticsApiData.put("columns",zohoAnalyticsApiDataColumns);
+		zohoAnalyticsInsertionUrl = settings.get("zohoAnalyticsApiBaseUrl") + "workspaces/" + settings.get("zohoAnalyticsWorkspaceId") + "/views/" + settings.get("zohoAnalyticsViewId") + "/rows?CONFIG=" + zoho.encryption.urlEncode(zohoAnalyticsApiData);
+		zohoAnalyticsApiHeader = Map();
+		zohoAnalyticsApiHeader.put("ZANALYTICS-ORGID",settings.get("zohoAnalyticsOrgId"));
+		zohoAnalyticsInsertionResponse = invokeurl
+		[
+			url :zohoAnalyticsInsertionUrl
+			type :POST
+			headers:zohoAnalyticsApiHeader
+			connection:zohoAnalyticsConnectionNameHelper
+		];
+		// The response of the API must be checked, because a problem here does not throw an error
+		if(!zohoAnalyticsInsertionResponse.get("status").equalsIgnoreCase("success"))
+		{
+			errors.add("zohoAnalyticsInsertionResponse: " + zohoAnalyticsInsertionResponse);
+			throws "Error occured on: Create row via API call";
+		}
+	}
+	catch (e)
+	{
+		errors.add("Error occured on: Insert row into Zoho Analtics table | " + e);
+	}
+}
+
+
+// ═════ mail notification ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+if(settings.get("sendMailOnErrors"))
+{
+	// ╔══════════════════════════════════════════════════════════════════════════╗                                                                     ║
+	// ║ TASKS:                                                                   ║
+	// ║ 1. Simplify the table generation by reducing repetitive code.            ║
+	// ║ 2. Streamline the email body generation process for better clarity.      ║
+	// ╚══════════════════════════════════════════════════════════════════════════╝
+	
+	// Templates for the email body
+	mailBody = "";
+	styles = "";
+	htmlTableGeneralStyle = 'table {font-family:Arial,Helvetica,sans-serif; border-collapse: collapse; width:100%} td,th {border:1px solid #ddd; padding:8px} tr:nth-child(even) {background-color:#ddd}';
+	htmlTableCustomStyle = '#${id} th{padding-top:12px;padding-bottom:12px;text-align:left;background-color:${backgroundColor};color:${fontColor}}';
+	htmlTable1ColumnsTemplate = '<table id=${id}><tr><th>${headerColumn1}</th></tr>${rows}</table>';
+	htmlTable2ColumnsTemplate = '<table id=${id}><tr><th>${headerColumn1}</th><th>${headerColumn2}</th></tr></tr>${rows}</table>';
+
+	// Information Table
+	informationTableId = "srt0";
+	styles = styles + htmlTableCustomStyle.replaceAll("${id}", informationTableId, true).replaceAll("${backgroundColor}", "#4bc467", true).replaceAll("${fontColor}", "#fff", true);
+	informationTable = htmlTable2ColumnsTemplate.replaceAll("${id}", informationTableId, true).replaceAll("${headerColumn1}", "Key", true).replaceAll("${headerColumn2}", "Value", true);
+	informationMapKeys = information.keys();
+	counterHelper = 0;
+	informationRows = "";
+	for each  elm in information
+	{
+		informationRows = informationRows + "<tr><td>" + informationMapKeys.get(counterHelper) + "</td><td>" + elm + "</td></tr>";
+		counterHelper = counterHelper + 1;
+	}
+	
+	mailBody = mailBody + "<h2>Information</h2>" + informationTable.replaceAll("${rows}", informationRows, true);
+	
+	// Parameters Table
+	parametersTableId = "srt1";
+	styles = styles + htmlTableCustomStyle.replaceAll("${id}", parametersTableId, true).replaceAll("${backgroundColor}", "#56b0c7", true).replaceAll("${fontColor}", "#fff", true);
+	parametersTable = htmlTable2ColumnsTemplate.replaceAll("${id}", parametersTableId, true).replaceAll("${headerColumn1}", "Key", true).replaceAll("${headerColumn2}", "Value", true);
+	parametersMapKeys = parameters.keys();
+	counterHelper = 0;
+	parametersRows = "";
+	for each  param in parameters
+	{
+		parametersRows = parametersRows + "<tr><td>" + parametersMapKeys.get(counterHelper) + "</td><td>" + param + "</td></tr>";
+		counterHelper = counterHelper + 1;
+	}
+	
+	mailBody = mailBody + "<h2>Parameters</h2>" + parametersTable.replaceAll("${rows}", parametersRows, true);
+	
+	// Settings Table
+	settingsTableId = "srt2";
+	styles = styles + htmlTableCustomStyle.replaceAll("${id}", settingsTableId, true).replaceAll("${backgroundColor}", "#b38f5d", true).replaceAll("${fontColor}", "#fff", true);
+	settingsTable = htmlTable2ColumnsTemplate.replaceAll("${id}", settingsTableId, true).replaceAll("${headerColumn1}", "Key", true).replaceAll("${headerColumn2}", "Value", true);
+	settingsMapKeys = settings.keys();
+	counterHelper = 0;
+	settingsRows = "";
+	for each  setting in settings
+	{
+		settingsRows = settingsRows + "<tr><td>" + settingsMapKeys.get(counterHelper) + "</td><td>" + setting + "</td></tr>";
+		counterHelper = counterHelper + 1;
+	}
+	
+	mailBody = mailBody + "<h2>Settings</h2>" + settingsTable.replaceAll("${rows}", settingsRows, true);
+	
+	// Error Table
+	errorTableId = "srt3";
+	styles = styles + htmlTableCustomStyle.replaceAll("${id}", errorTableId, true).replaceAll("${backgroundColor}", "#9e3737", true).replaceAll("${fontColor}", "#fff", true);
+	errorTable = htmlTable1ColumnsTemplate.replaceAll("${id}", errorTableId, true).replaceAll("${headerColumn1}", "Error", true);
+	errorRows = "";
+	for each  error in errors
+	{
+		errorRows = errorRows + "<tr><td>" + error + "</td></tr>";
+	}
+	
+	mailBody = mailBody + "<h2>Errors</h2>" + errorTable.replaceAll("${rows}", errorRows, true);
+	// Styles
+	mailBody = "<style>" + htmlTableGeneralStyle + styles + "</style>" + mailBody;
+	
+	sendmail
+	[
+		from :zoho.adminuserid
+		to :settings.get("emailRecipients")
+		subject :"⚠️ An error occurred when executing a custom function inside zoho desk"
+		message :mailBody
+	]
+}
