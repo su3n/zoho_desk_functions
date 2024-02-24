@@ -27,7 +27,7 @@ parameters.put("ticketId", ticketId);
 
 // Change the TLD according to the Zoho Data Center used [.com, .eu, .in, .com.cn, .com.au, .jp]
 settings.put("zohoDeskApiBaseUrl","https://desk.zoho.eu/api/v1/");
-// A connection is required that has at least this scopes: Desk.tickets.READ, Desk.basic.READ, Desk.tickets.UPDATE (can be created under Settings > Developer Space > Connections)
+// A connection is required that has at least this scopes: Desk.tickets.READ, Desk.settings.READ, Desk.tickets.UPDATE (can be created under Settings > Developer Space > Connections)
 settings.put("zohoDeskConnectionName","CHANGE_ME");
 settings.put("zohoAnalyticsOrgId",CHANGE_ME);
 
@@ -89,7 +89,7 @@ try
 	}
 	searchTemplateStart = settings.get("searchTemplate").left(settings.get("searchTemplate").indexOf("~"));
 	searchTemplateEnd = settings.get("searchTemplate").replaceFirst(searchTemplateStart + "~","",true);
-	regEx = searchTemplateStart + "[\-a-zA-Z\.@ ]+" + searchTemplateEnd;
+	regEx = searchTemplateStart + "[\-a-zA-Z0-9\.@ ]+" + searchTemplateEnd;
 }
 catch (e)
 {
