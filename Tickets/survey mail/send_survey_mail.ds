@@ -1,0 +1,208 @@
+// ╔═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ║
+// ║ This function creates a survey URL, renders an mail template and sends it to the contact
+// ║
+// ╚═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+settings = Map();
+parameters = Map();
+information = Map();
+
+// ═════ General Information ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+// Mainly for logging
+information.put("functionName", "send_survey_mail");
+information.put("creatorName", "Doe, John");
+information.put("creationDate", "2024-03-11");
+
+
+// ═════ Parameters ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+// Mainly for logging
+parameters.put("ticketId", ticketId);
+parameters.put("contactMail", contactMail);
+
+
+// ═════ General settings ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+// Change the TLD according to the Zoho Data Center used [.com, .eu, .in, .com.cn, .com.au, .jp]
+settings.put("zohoDeskApiBaseUrl","https://desk.zoho.eu/api/v1/");
+// A connection is required that has at least this scopes: Desk.tickets.READ, Desk.settings.READ (can be created under Settings > Developer Space > Connections)
+settings.put("zohoDeskConnectionName","CHANGE_ME");
+
+
+// ═════ Survey settings ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+settings.put("surveyBaseUrl","CHANGE_ME");
+
+// ═════ Mail settings ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+settings.put("mailTemplateId",CHANGE_ME);
+settings.put("mailFromAddress","CHANGE_ME");
+settings.put("surveyUrlPlaceholder","{SurveyUrl}");
+
+
+// ═════ Error handling settings ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+settings.put("sendMailOnErrors",true);
+// Comma separated list of emails possible
+settings.put("emailRecipients","CHANGE_ME");
+
+// ═════ Vars ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+errors = List();
+// In Zoho Survey you have made a hash setting in the global settings, which you use for the survey, enter the secret here
+hashKey = "CHANGE_ME";
+
+// ═════ Ugly workaround ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+// In the invokeurl task, no connection can be specified by reading the value from a map, so these values must be stored separately into a variable, then it works...
+zohoDeskConnectionNameHelper = settings.get("zohoDeskConnectionName").toString();
+
+// ═════ Send mail ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+try {
+	surveyParams = List();
+	surveyParams.add('{"name": "t", "value": "' + parameters.get("ticketId") + '"}');
+	// surveyParams.add('{"paramName": "moreStuff", "paramValue": "xxx"}');
+	// ...
+	linkToSurvey = settings.get("surveyBaseUrl");
+	counter = 0;
+	for each param in surveyParams
+    {
+		linkToSurvey = linkToSurvey + if(counter > 0, "&", "?") + param.get("name") + "=" + param.get("value");
+		counter = counter + 1;
+    }
+	urlFragments = linkToSurvey.toList("/");
+	stringToHash = "/" + urlFragments.get(urlFragments.size()-2) + "/" + urlFragments.get(urlFragments.size()-1);
+	hashValue = zoho.encryption.hmacsha256(hashKey, stringToHash, "hex");
+	linkToSurvey = linkToSurvey + "&hash=" + hashValue;
+	
+	getProcessedTemplateTextResponse = invokeurl
+	[
+		url : settings.get("zohoDeskApiBaseUrl") + "templates/" + settings.get("mailTemplateId") + "/render?entityId=" + parameters.get("ticketId")
+		type :POST
+		connection:zohoDeskConnectionNameHelper
+	];
+	
+	// The response of the API must be checked, because a problem here does not throw an error
+	if(!getProcessedTemplateTextResponse.get("errorCode").isNull())
+	{
+		errors.add("getProcessedTemplateTextResponse: " + getProcessedTemplateTextResponse);
+		throws "Error occured on: Get Mail Templated via API Call";
+	}
+	
+	mailBodyContent = getProcessedTemplateTextResponse.get("body").replaceAll(settings.get("surveyUrlPlaceholder"), linkToSurvey, true);
+	mailSubjectContent = getProcessedTemplateTextResponse.get("subject");
+	
+	mailData = Map();
+	mailData.put("content", mailBodyContent);
+	mailData.put("contentType", "html");
+	mailData.put("channel", "EMAIL");
+	mailData.put("fromEmailAddress", settings.get("mailFromAddress"));
+	mailData.put("to", settings.get("contactMail"));
+	
+	sendMailResponse = invokeurl
+	[
+		url : settings.get("zohoDeskApiBaseUrl") + "tickets/" + parameters.get("ticketId") + "/sendReply?sendImmediately=true"
+		type : POST
+		parameters: mailData.toString()
+		connection: zohoDeskConnectionNameHelper
+	];
+	
+	// The response of the API must be checked, because a problem here does not throw an error
+	if(!sendMailResponse.get("errorCode").isNull())
+	{
+		errors.add("sendMailResponse: " + sendMailResponse);
+		throws "Error occured on: Send Mail Reply via API Call";
+	}
+	
+} catch (e) {
+	errors.add("Error occured on: Send mail | " + e);
+}
+
+// ═════ mail notification ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+if(settings.get("sendMailOnErrors") && errors.size() > 0)
+{
+	// ╔══════════════════════════════════════════════════════════════════════════╗                                                                     ║
+	// ║ TASKS:                                                                   ║
+	// ║ 1. Simplify the table generation by reducing repetitive code.            ║
+	// ║ 2. Streamline the email body generation process for better clarity.      ║
+	// ╚══════════════════════════════════════════════════════════════════════════╝
+	
+	// Templates for the email body
+	mailBody = "";
+	styles = "";
+	htmlTableGeneralStyle = 'table {font-family:Arial,Helvetica,sans-serif; border-collapse: collapse; width:100%} td,th {border:1px solid #ddd; padding:8px} tr:nth-child(even) {background-color:#ddd}';
+	htmlTableCustomStyle = '#${id} th{padding-top:12px;padding-bottom:12px;text-align:left;background-color:${backgroundColor};color:${fontColor}}';
+	htmlTable1ColumnsTemplate = '<table id=${id}><tr><th>${headerColumn1}</th></tr>${rows}</table>';
+	htmlTable2ColumnsTemplate = '<table id=${id}><tr><th>${headerColumn1}</th><th>${headerColumn2}</th></tr></tr>${rows}</table>';
+
+	// Information Table
+	informationTableId = "srt0";
+	styles = styles + htmlTableCustomStyle.replaceAll("${id}", informationTableId, true).replaceAll("${backgroundColor}", "#4bc467", true).replaceAll("${fontColor}", "#fff", true);
+	informationTable = htmlTable2ColumnsTemplate.replaceAll("${id}", informationTableId, true).replaceAll("${headerColumn1}", "Key", true).replaceAll("${headerColumn2}", "Value", true);
+	informationMapKeys = information.keys();
+	counterHelper = 0;
+	informationRows = "";
+	for each  elm in information
+	{
+		informationRows = informationRows + "<tr><td>" + informationMapKeys.get(counterHelper) + "</td><td>" + elm + "</td></tr>";
+		counterHelper = counterHelper + 1;
+	}
+	
+	mailBody = mailBody + "<h2>Information</h2>" + informationTable.replaceAll("${rows}", informationRows, true);
+	
+	// Parameters Table
+	parametersTableId = "srt1";
+	styles = styles + htmlTableCustomStyle.replaceAll("${id}", parametersTableId, true).replaceAll("${backgroundColor}", "#56b0c7", true).replaceAll("${fontColor}", "#fff", true);
+	parametersTable = htmlTable2ColumnsTemplate.replaceAll("${id}", parametersTableId, true).replaceAll("${headerColumn1}", "Key", true).replaceAll("${headerColumn2}", "Value", true);
+	parametersMapKeys = parameters.keys();
+	counterHelper = 0;
+	parametersRows = "";
+	for each  param in parameters
+	{
+		parametersRows = parametersRows + "<tr><td>" + parametersMapKeys.get(counterHelper) + "</td><td>" + param + "</td></tr>";
+		counterHelper = counterHelper + 1;
+	}
+	
+	mailBody = mailBody + "<h2>Parameters</h2>" + parametersTable.replaceAll("${rows}", parametersRows, true);
+	
+	// Settings Table
+	settingsTableId = "srt2";
+	styles = styles + htmlTableCustomStyle.replaceAll("${id}", settingsTableId, true).replaceAll("${backgroundColor}", "#b38f5d", true).replaceAll("${fontColor}", "#fff", true);
+	settingsTable = htmlTable2ColumnsTemplate.replaceAll("${id}", settingsTableId, true).replaceAll("${headerColumn1}", "Key", true).replaceAll("${headerColumn2}", "Value", true);
+	settingsMapKeys = settings.keys();
+	counterHelper = 0;
+	settingsRows = "";
+	for each  setting in settings
+	{
+		settingsRows = settingsRows + "<tr><td>" + settingsMapKeys.get(counterHelper) + "</td><td>" + setting + "</td></tr>";
+		counterHelper = counterHelper + 1;
+	}
+	
+	mailBody = mailBody + "<h2>Settings</h2>" + settingsTable.replaceAll("${rows}", settingsRows, true);
+	
+	// Error Table
+	errorTableId = "srt3";
+	styles = styles + htmlTableCustomStyle.replaceAll("${id}", errorTableId, true).replaceAll("${backgroundColor}", "#9e3737", true).replaceAll("${fontColor}", "#fff", true);
+	errorTable = htmlTable1ColumnsTemplate.replaceAll("${id}", errorTableId, true).replaceAll("${headerColumn1}", "Error", true);
+	errorRows = "";
+	for each  error in errors
+	{
+		errorRows = errorRows + "<tr><td>" + error + "</td></tr>";
+	}
+	
+	mailBody = mailBody + "<h2>Errors</h2>" + errorTable.replaceAll("${rows}", errorRows, true);
+	// Styles
+	mailBody = "<style>" + htmlTableGeneralStyle + styles + "</style>" + mailBody;
+	
+	sendmail
+	[
+		from :zoho.adminuserid
+		to :settings.get("emailRecipients")
+		subject :"⚠️ An error occurred when executing a custom function inside zoho desk"
+		message :mailBody
+	]
+}
