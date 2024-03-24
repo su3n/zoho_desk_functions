@@ -34,6 +34,7 @@ settings.put("zohoDeskConnectionName","CHANGE_ME");
 // ═════ Survey settings ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
 settings.put("surveyBaseUrl","CHANGE_ME");
+settings.put("surveyUrlParamName","tId");
 
 // ═════ Mail settings ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
@@ -63,7 +64,7 @@ zohoDeskConnectionNameHelper = settings.get("zohoDeskConnectionName").toString()
 // ═════ Send mail ═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 try {
 	surveyParams = List();
-	surveyParams.add('{"name": "t", "value": "' + parameters.get("ticketId") + '"}');
+	surveyParams.add('{"name": "' + settings.get("surveyUrlParamName") + '", "value": "' + parameters.get("ticketId") + '"}');
 	// surveyParams.add('{"paramName": "moreStuff", "paramValue": "xxx"}');
 	// ...
 	linkToSurvey = settings.get("surveyBaseUrl");
